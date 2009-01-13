@@ -1,0 +1,6 @@
+This is my first major foray into Clojure. The intent is to write a
+Swing game that's a clone of the old BomberMan game. I'm hoping to
+take it in very tiny steps, starting with just displaying a blank
+screen, then a maze, and eventually getting to the point where there's
+a working game. Long term, I'd love to get network multiplayer
+working. 

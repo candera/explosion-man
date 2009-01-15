@@ -1,0 +1,1 @@
+* Get board to paint with simple colored boxes in a grid

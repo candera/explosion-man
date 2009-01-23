@@ -1,1 +1,5 @@
+! TODO
+
+! DONE 
+* Figure out why the proxy isn't working 
 * Get board to paint with simple colored boxes in a grid

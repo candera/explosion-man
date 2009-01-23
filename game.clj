@@ -1,5 +1,6 @@
 (ns com.wangdera.explosion-man.game
-  (:import (javax.swing JFrame)
+  (:import (javax.swing JFrame JPanel)
+	   (java.awt Dimension)
 	   (java.awt.event ActionListener KeyListener)
 	   (java.awt Color)))
 
@@ -25,12 +26,13 @@
 (defn- paint 
   "Paints the game"
   [g]
-  (do 
+  (dorun 
     (for [x (range 0 *board-width*), 
 	  y (range 0 *board-height*)] 
       (do  
-	(.setColor 
-	 (Color. (/ x *board-width*) (/ y *board-height*) 0.5))
+	(.setColor
+	 g
+	 (Color. (float (/ x *board-width*)) (float (/ y *board-height*)) (float 0.5)))
 	(.fillRoundRect 
 	 g 
 	 (* x *cell-width*)
@@ -45,7 +47,7 @@
   []
   (proxy [JPanel ActionListener KeyListener] []
     (getPreferredSize 
-     []
+     [] 
      (Dimension.
       (* *board-width* *cell-width*)
       (* *board-height* *cell-height*)))
@@ -85,3 +87,10 @@
      (finally
       (.dispose frame)))))
 
+(defn main-test []
+  (let [frame (make-frame)
+	panel (make-panel)]
+    (.add frame panel)
+;;     (.setDefaultCloseOperation frame JFrame/EXIT_ON_CLOSE)
+    (.pack frame)
+    (.show frame)))

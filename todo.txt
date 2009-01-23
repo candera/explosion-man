@@ -1,4 +1,6 @@
 ! TODO
+* Handle a keypress and make it move a highlighted square around the
+  board. 
 
 ! DONE 
 * Figure out why the proxy isn't working 

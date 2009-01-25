@@ -136,25 +136,27 @@ maximum (exclusive)"
 	 (Thread/sleep *turn-length*)
 	 (recur (stop? frame)))))))
 
-(defn main []
-  (let [frame (make-frame), 
-	panel (make-panel)] 
-    (try 
-     (.setFocusable panel true)
-     (.addKeyListener panel)
-     (.add frame panel)
-     (.setDefaultCloseOperation frame JFrame/EXIT_ON_CLOSE)
-     (.pack frame)
-     (run frame)
-     (finally
-      (.dispose frame)))))
-
-(defn main-test []
+(defn- setup 
+  "Sets up the frame and panel - common to both manual and 
+game-related invocation."
+  [exit-on-close]
   (let [frame (make-frame)
 	panel (make-panel)]
     (.add frame panel)
     (.setFocusable panel true)
     (.addKeyListener panel panel)
-;;     (.setDefaultCloseOperation frame JFrame/EXIT_ON_CLOSE)
+    (if exit-on-close 
+      (.setDefaultCloseOperation frame JFrame/EXIT_ON_CLOSE))
     (.pack frame)
-    (.show frame)))
+    (.show frame)
+    [frame panel]))
+
+(defn main []
+  (let [[frame panel] (setup true)] 
+    (try 
+     (run frame)
+     (finally
+      (.dispose frame)))))
+
+(defn main-test []
+  (setup false))

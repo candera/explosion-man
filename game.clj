@@ -23,11 +23,13 @@
 	     VK_UP    [0 -1]
 	     VK_RIGHT [1 0]})
 
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Variables
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(def game-state (ref {:cursor (map #(int (/ % 2)) *board-dims*)}))
+
+(def game-state (ref []))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Functions
@@ -39,51 +41,105 @@ maximum (exclusive)"
   [x minimum maximum]
   (min (max x minimum) (dec maximum)))
 
+(defn- horiz
+  "Returns the horizontal component of a dimension"
+  [dim]
+  (first dim))
+
+(defn- vert
+  "Returns the vertical component of a dimension"
+  [dim]
+  (second dim))
+
 (defn- board-width 
   "Returns the width of the board in cells"
   []
-  (first *board-dims*))
+  (horiz *board-dims*))
 
 (defn- board-height
   "Returns the height of the board in cells"
   [] 
-  (second *board-dims*))
+  (vert *board-dims*))
 
 (defn- cell-width
   "Returns the width of a cell in pixels"
   []
-  (first *cell-dims*))
+  (horiz *cell-dims*))
 
 (defn- cell-height
   "Returns the height of a cell in pixels"
   []
-  (second *cell-dims*))
+  (vert *cell-dims*))
+
+(defn- make-cursor
+  "Creates a new cursor object"
+  [loc]
+  {:type :cursor :location loc})
 
 (defn- make-frame 
   "Creates the JFrame for the app."
   []
   (JFrame. "Explosion Man"))
 
+(defn- make-random-locations
+  "Creates a random collection of locations on the grid specified by [width height]"
+  [[width height] density]
+  (vec (distinct (for [i (range 0 (* density (* width height)))]
+		   [(rand-int width) (rand-int height)]))))
+
+(defn- make-wall
+  "Creates a new wall object"
+  [loc]
+  {:type :wall :location loc})
+
+(defn- initial-game-state
+  "Returns a new game with a random maze of the given density"
+  [density]
+  (let [cursor (make-cursor (vec (map #(int (/ % 2)) *board-dims*)))] 
+    (into [cursor] 
+	  (remove #(= % (make-wall (:location cursor))) 
+		  (map make-wall (make-random-locations *board-dims* density))))))
+
+(defn- get-cursor
+  "Returns the cursor object"
+  []
+  (first (filter #(= (:type %) :cursor) @game-state)))
+
+(defn- move-cursor 
+  "Moves the cursor in the specified direction"
+  [cursor-loc direction]
+  (vec (map clamp-to (map + cursor-loc direction) [0 0] *board-dims*)))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Graphics stuff
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn- color 
+  "Creates a java.awt.Color from an rgb triplet"
+  [r g b]
+  (Color. (float r) (float g) (float b)))
+
+(defmulti get-color :type)
+(defmethod get-color :wall [o]  (color 1 0 0))
+(defmethod get-color :cursor [o] (color 0 1 0))
+(defmethod get-color :default [o] (color 0 0 0))
+
 (defn- paint 
   "Paints the game"
   [g]
-  (dorun 
-    (for [x (range 0 (board-width)), 
-	  y (range 0 (board-height))] 
-      (do  
-	(.setColor
-	 g
-	 (if (= [x y] (:cursor @game-state)) 
-	   (Color. 0 0 0)
-	   (Color. (float (/ x (board-width))) (float (/ y (board-height))) (float 0.5))))
-	(.fillRoundRect 
-	 g 
-	 (* x (cell-width))
-	 (* y (cell-height))
-	 (dec (cell-width))
-	 (dec (cell-height))
-	 (/ (cell-width) 5)
-	 (/ (cell-height) 5))))))
+  (doseq [item @game-state]
+;   (println item)
+;   (println (get-color item))
+    (.setColor g (get-color item))
+    (.fillRoundRect
+     g
+     (* (horiz (:location item)) (cell-width))
+     (* (vert (:location item))  (cell-height))
+     (dec (cell-width))
+     (dec (cell-height))
+     (/ (cell-width) 5)
+     (/ (cell-height) 5))))
+
 
 (defn- handle-keypress 
   "Updates the game state accordingly when a key is pressed"
@@ -92,12 +148,14 @@ maximum (exclusive)"
 		    (.getKeyCode e)
 		    (*dirs* (.getKeyCode e))))
   (dosync 
-   (let [cursor (:cursor @game-state)
+   (let [cursor (get-cursor)
 	 keycode (.getKeyCode e)
 	 direction (*dirs* keycode)] 
      (if direction 
-       (alter game-state assoc :cursor 
-	      (vec (map clamp-to (map + cursor direction) [0 0] *board-dims*)))))))
+       (ref-set game-state 
+		 (replace {cursor (make-cursor (move-cursor (:location cursor) direction))} 
+			  @game-state))))))
+
 
 (defn- make-panel
   "Creates the JPanel for the app."
@@ -142,6 +200,7 @@ game-related invocation."
   [exit-on-close]
   (let [frame (make-frame)
 	panel (make-panel)]
+    (dosync (ref-set game-state (initial-game-state 0.25)))
     (.add frame panel)
     (.setFocusable panel true)
     (.addKeyListener panel panel)

@@ -1,8 +1,9 @@
 ! TODO
-* Display a random maze
+* Read something on git that explains the bits I don't understand
 * Move the highlighted square through the maze (collision detection)
 
 ! DONE 
+* Display a random maze
 * Figure out why the proxy isn't working 
 * Get board to paint with simple colored boxes in a grid
 * Handle a keypress and make it move a highlighted square around the

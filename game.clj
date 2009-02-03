@@ -105,10 +105,20 @@ maximum (exclusive)"
   []
   (first (filter #(= (:type %) :cursor) @game-state)))
 
+(defn- wall-at?
+  "Returns true if there is a wall at the specified location"
+  [loc]
+  (some #(and (= (:type %) :wall)
+	      (= (:location %) loc))
+	@game-state))
+
 (defn- move-cursor 
   "Moves the cursor in the specified direction"
   [cursor-loc direction]
-  (vec (map clamp-to (map + cursor-loc direction) [0 0] *board-dims*)))
+  (let [proposed-location (vec (map clamp-to (map + cursor-loc direction) [0 0] *board-dims*))]
+   (if (wall-at? proposed-location) 
+     cursor-loc
+     proposed-location)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Graphics stuff
@@ -144,9 +154,9 @@ maximum (exclusive)"
 (defn- handle-keypress 
   "Updates the game state accordingly when a key is pressed"
   [e]
-  (println (format "Key pressed: %s %s %s" (:cursor @game-state)
-		    (.getKeyCode e)
-		    (*dirs* (.getKeyCode e))))
+;;   (println (format "Key pressed: %s %s %s" (:cursor @game-state)
+;; 		    (.getKeyCode e)
+;; 		    (*dirs* (.getKeyCode e))))
   (dosync 
    (let [cursor (get-cursor)
 	 keycode (.getKeyCode e)

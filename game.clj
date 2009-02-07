@@ -3,12 +3,12 @@
 	   (java.awt Dimension)
 	   (java.awt.event ActionListener KeyListener KeyEvent)
 	   (java.awt Color))
-  (:use (clojure.contrib import-static)))
+  (:use (clojure.contrib import-static cond)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Static imports
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(import-static java.awt.event.KeyEvent VK_LEFT VK_RIGHT VK_UP VK_DOWN)
+(import-static java.awt.event.KeyEvent VK_LEFT VK_RIGHT VK_UP VK_DOWN VK_SPACE)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Constants
@@ -18,10 +18,11 @@
 (def *board-dims* [25 25])  ; Size of board in cells
 (def *cell-dims* [40 40])   ; Size of cell in pixels
 
-(def *dirs* {VK_LEFT  [-1 0]
-	     VK_DOWN  [0 1]
-	     VK_UP    [0 -1]
-	     VK_RIGHT [1 0]})
+(def *key-map* {VK_LEFT  [:movement [-1 0]]
+		VK_DOWN  [:movement [0 1]]
+		VK_UP    [:movement [0 -1]]
+		VK_RIGHT [:movement [1 0]]
+		VK_SPACE [:bomb     nil]})
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -71,10 +72,25 @@ maximum (exclusive)"
   []
   (vert *cell-dims*))
 
-(defn- make-cursor
-  "Creates a new cursor object"
-  [loc]
-  {:type :cursor :location loc})
+(defmacro defitem [t]
+  (let [item-type-name# (name t)]
+   `(defn- ~(symbol (str "make-" item-type-name#))
+      [loc#]
+      {:type ~(keyword item-type-name#) :location loc#})))
+
+(defitem bomb)
+(defitem wall)
+(defitem cursor)
+
+;; (defn- make-cursor
+;;   "Creates a new cursor object"
+;;   [loc]
+;;   {:type :cursor :location loc})
+
+;; (defn- make-wall
+;;   "Creates a new wall object"
+;;   [loc]
+;;   {:type :wall :location loc})
 
 (defn- make-frame 
   "Creates the JFrame for the app."
@@ -87,10 +103,6 @@ maximum (exclusive)"
   (vec (distinct (for [i (range 0 (* density (* width height)))]
 		   [(rand-int width) (rand-int height)]))))
 
-(defn- make-wall
-  "Creates a new wall object"
-  [loc]
-  {:type :wall :location loc})
 
 (defn- initial-game-state
   "Returns a new game with a random maze of the given density"
@@ -150,6 +162,22 @@ maximum (exclusive)"
      (/ (cell-width) 5)
      (/ (cell-height) 5))))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Keypress stuff
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defmulti act-on-key (fn [action data] keycode))
+
+(defmethod act-on-key :movement [action data]
+  (dosync 
+   (let [cursor (get-cursor)]
+     (ref-set game-state 
+	      (replace {cursor (make-cursor (move-cursor (:location cursor) direction))} 
+		       @game-state)))))
+
+(defmethod act-on-key :bomb [action data]
+  (dosync 
+   (let [cursor (get-cursor)]
+     (alter game-state conj (make-bomb (:location cursor))))))
 
 (defn- handle-keypress 
   "Updates the game state accordingly when a key is pressed"
@@ -157,14 +185,7 @@ maximum (exclusive)"
 ;;   (println (format "Key pressed: %s %s %s" (:cursor @game-state)
 ;; 		    (.getKeyCode e)
 ;; 		    (*dirs* (.getKeyCode e))))
-  (dosync 
-   (let [cursor (get-cursor)
-	 keycode (.getKeyCode e)
-	 direction (*dirs* keycode)] 
-     (if direction 
-       (ref-set game-state 
-		 (replace {cursor (make-cursor (move-cursor (:location cursor) direction))} 
-			  @game-state))))))
+  (act-on-key (*key-map* (.getKeyCode e))))
 
 
 (defn- make-panel

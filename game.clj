@@ -18,11 +18,11 @@
 (def *board-dims* [25 25])  ; Size of board in cells
 (def *cell-dims* [40 40])   ; Size of cell in pixels
 
-(def *key-map* {VK_LEFT  [:movement [-1 0]]
-		VK_DOWN  [:movement [0 1]]
-		VK_UP    [:movement [0 -1]]
-		VK_RIGHT [:movement [1 0]]
-		VK_SPACE [:bomb     nil]})
+(def *key-map* {VK_LEFT  [::movement [-1 0]]
+		VK_DOWN  [::movement [0 1]]
+		VK_UP    [::movement [0 -1]]
+		VK_RIGHT [::movement [1 0]]
+		VK_SPACE [::lay-bomb  nil]})
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -72,25 +72,8 @@ maximum (exclusive)"
   []
   (vert *cell-dims*))
 
-(defmacro defitem [t]
-  (let [item-type-name# (name t)]
-   `(defn- ~(symbol (str "make-" item-type-name#))
-      [loc#]
-      {:type ~(keyword item-type-name#) :location loc#})))
-
-(defitem bomb)
-(defitem wall)
-(defitem cursor)
-
-;; (defn- make-cursor
-;;   "Creates a new cursor object"
-;;   [loc]
-;;   {:type :cursor :location loc})
-
-;; (defn- make-wall
-;;   "Creates a new wall object"
-;;   [loc]
-;;   {:type :wall :location loc})
+(defn- make-item [t loc]
+  {:type t :location loc})
 
 (defn- make-frame 
   "Creates the JFrame for the app."
@@ -107,20 +90,20 @@ maximum (exclusive)"
 (defn- initial-game-state
   "Returns a new game with a random maze of the given density"
   [density]
-  (let [cursor (make-cursor (vec (map #(int (/ % 2)) *board-dims*)))] 
+  (let [cursor (make-item ::cursor (vec (map #(int (/ % 2)) *board-dims*)))] 
     (into [cursor] 
-	  (remove #(= % (make-wall (:location cursor))) 
-		  (map make-wall (make-random-locations *board-dims* density))))))
+	  (remove #(= % (make-item ::wall (:location cursor))) 
+		  (map #(make-item ::wall %) (make-random-locations *board-dims* density))))))
 
 (defn- get-cursor
   "Returns the cursor object"
   []
-  (first (filter #(= (:type %) :cursor) @game-state)))
+  (first (filter #(= (:type %) ::cursor) @game-state)))
 
 (defn- wall-at?
   "Returns true if there is a wall at the specified location"
   [loc]
-  (some #(and (= (:type %) :wall)
+  (some #(and (= (:type %) ::wall)
 	      (= (:location %) loc))
 	@game-state))
 
@@ -142,9 +125,43 @@ maximum (exclusive)"
   (Color. (float r) (float g) (float b)))
 
 (defmulti get-color :type)
-(defmethod get-color :wall [o]  (color 1 0 0))
-(defmethod get-color :cursor [o] (color 0 1 0))
+(defmethod get-color ::wall [o]  (color 1 0 0))
+(defmethod get-color ::cursor [o] (color 0 1 0))
+(defmethod get-color ::bomb [o] (color 0 0 0))
 (defmethod get-color :default [o] (color 0 0 0))
+
+(derive ::wall ::rectangular)
+(derive ::cursor ::rectangular)
+(derive ::bomb ::round)
+
+(defmulti paint-item (fn [g item] (:type item)))
+
+(defn- item-bounds [item]
+  {:x (* (horiz (:location item)) (cell-width))
+   :y (* (vert (:location item))  (cell-height))
+   :width (dec (cell-width))
+   :height (dec (cell-height))}
+  )
+
+(defmethod paint-item ::rectangular [g item]
+  (let [bounds (item-bounds item)] 
+    (.fillRoundRect
+     g
+     (:x bounds)
+     (:y bounds)
+     (:width bounds)
+     (:height bounds)
+     (/ (cell-width) 5)
+     (/ (cell-height) 5))))
+
+(defmethod paint-item ::round [g item]
+  (let [bounds (item-bounds item)] 
+    (.fillOval 
+     g
+     (:x bounds)
+     (:y bounds)
+     (:width bounds)
+     (:height bounds))))
 
 (defn- paint 
   "Paints the game"
@@ -153,31 +170,37 @@ maximum (exclusive)"
 ;   (println item)
 ;   (println (get-color item))
     (.setColor g (get-color item))
-    (.fillRoundRect
-     g
-     (* (horiz (:location item)) (cell-width))
-     (* (vert (:location item))  (cell-height))
-     (dec (cell-width))
-     (dec (cell-height))
-     (/ (cell-width) 5)
-     (/ (cell-height) 5))))
+    (paint-item g item)
+    ))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Keypress stuff
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defmulti act-on-key (fn [action data] keycode))
+(defn- act-on-key-dispatch
+  "Dispatch function for the act-on-key multimethod"
+  ([] nil)
+  ([action] action)
+  ([action data] action))
 
-(defmethod act-on-key :movement [action data]
+(defmulti act-on-key act-on-key-dispatch)
+
+(defmethod act-on-key ::movement [action data]
   (dosync 
    (let [cursor (get-cursor)]
      (ref-set game-state 
-	      (replace {cursor (make-cursor (move-cursor (:location cursor) direction))} 
+	      (replace {cursor (make-item ::cursor (move-cursor (:location cursor) data))} 
 		       @game-state)))))
 
-(defmethod act-on-key :bomb [action data]
+(defmethod act-on-key ::lay-bomb [action data]
   (dosync 
    (let [cursor (get-cursor)]
-     (alter game-state conj (make-bomb (:location cursor))))))
+     (alter game-state conj (make-item ::bomb (:location cursor))))))
+
+(defmethod act-on-key :default 
+  ([] "Ignoring keypress")
+  ([action] "Ignoring keypress")
+  ([action data]
+     (println "Ignoring keypress")))
 
 (defn- handle-keypress 
   "Updates the game state accordingly when a key is pressed"
@@ -185,7 +208,7 @@ maximum (exclusive)"
 ;;   (println (format "Key pressed: %s %s %s" (:cursor @game-state)
 ;; 		    (.getKeyCode e)
 ;; 		    (*dirs* (.getKeyCode e))))
-  (act-on-key (*key-map* (.getKeyCode e))))
+  (apply act-on-key (*key-map* (.getKeyCode e))))
 
 
 (defn- make-panel

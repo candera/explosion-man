@@ -1,8 +1,12 @@
 ! TODO
-* Read something on git that explains the bits I don't understand
-* Add ability to drop bomb by pressing a key (no behavior)
+* Make bomb count down to zero and disappear (no explosion)
+* Make bomb explode
+* Add destroyable obstacles
+* Make bomb explosion remove obstacles
 
 ! DONE 
+* Add ability to drop bomb by pressing a key (no behavior)
+* Read something on git that explains the bits I don't understand
 * Move the highlighted square through the maze (collision detection)
 * Display a random maze
 * Figure out why the proxy isn't working 

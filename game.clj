@@ -1,5 +1,24 @@
+;; ! TODO
+;; * Make bomb count down to zero and disappear (no explosion)
+;; * Make bomb explode
+;; * Add destroyable obstacles
+;; * Make bomb explosion remove obstacles
+;; * Handle shutdown - timers are sticking around and the panel is
+;;   not getting created anew every time.
+;; 
+;; ! DONE 
+;; * Add ability to drop bomb by pressing a key (no behavior)
+;; * Read something on git that explains the bits I don't understand
+;; * Move the highlighted square through the maze (collision detection)
+;; * Display a random maze
+;; * Figure out why the proxy isn't working 
+;; * Get board to paint with simple colored boxes in a grid
+;; * Handle a keypress and make it move a highlighted square around the
+;;   board. 
+
+
 (ns com.wangdera.explosion-man.game
-  (:import (javax.swing JFrame JPanel)
+  (:import (javax.swing JFrame JPanel Timer)
 	   (java.awt Dimension)
 	   (java.awt.event ActionListener KeyListener KeyEvent)
 	   (java.awt Color))
@@ -14,23 +33,23 @@
 ;; Constants
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(def *turn-length* 200)     ; Length of a turn in ms
-(def *board-dims* [25 25])  ; Size of board in cells
+(def turn-length 1)     ; Length of a turn in seconds
+(def board-dims [25 25])  ; Size of board in cells
 (def *cell-dims* [40 40])   ; Size of cell in pixels
 
 (def *key-map* {VK_LEFT  [::movement [-1 0]]
 		VK_DOWN  [::movement [0 1]]
 		VK_UP    [::movement [0 -1]]
 		VK_RIGHT [::movement [1 0]]
-		VK_SPACE [::lay-bomb  nil]})
+		VK_SPACE [::lay-bomb]})
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Variables
+;; Game state
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
 
 (def game-state (ref []))
+(def clock (ref 0))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Functions
@@ -55,12 +74,12 @@ maximum (exclusive)"
 (defn- board-width 
   "Returns the width of the board in cells"
   []
-  (horiz *board-dims*))
+  (horiz board-dims))
 
 (defn- board-height
   "Returns the height of the board in cells"
   [] 
-  (vert *board-dims*))
+  (vert board-dims))
 
 (defn- cell-width
   "Returns the width of a cell in pixels"
@@ -73,7 +92,12 @@ maximum (exclusive)"
   (vert *cell-dims*))
 
 (defn- make-item [t loc]
-  {:type t :location loc})
+  {:type t :location loc :created @clock})
+
+(defn- make-bomb 
+  "Creates a bomb at the specified location and with the specified fuze (in seconds)."
+  [loc fuze]
+  (assoc (make-item ::bomb loc) :fuze 20))
 
 (defn- make-frame 
   "Creates the JFrame for the app."
@@ -90,10 +114,10 @@ maximum (exclusive)"
 (defn- initial-game-state
   "Returns a new game with a random maze of the given density"
   [density]
-  (let [cursor (make-item ::cursor (vec (map #(int (/ % 2)) *board-dims*)))] 
+  (let [cursor (make-item ::cursor (vec (map #(int (/ % 2)) board-dims)))] 
     (into [cursor] 
 	  (remove #(= % (make-item ::wall (:location cursor))) 
-		  (map #(make-item ::wall %) (make-random-locations *board-dims* density))))))
+		  (map #(make-item ::wall %) (make-random-locations board-dims density))))))
 
 (defn- get-cursor
   "Returns the cursor object"
@@ -110,10 +134,11 @@ maximum (exclusive)"
 (defn- move-cursor 
   "Moves the cursor in the specified direction"
   [cursor-loc direction]
-  (let [proposed-location (vec (map clamp-to (map + cursor-loc direction) [0 0] *board-dims*))]
+  (let [proposed-location (vec (map clamp-to (map + cursor-loc direction) [0 0] board-dims))]
    (if (wall-at? proposed-location) 
      cursor-loc
      proposed-location)))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Graphics stuff
@@ -124,24 +149,60 @@ maximum (exclusive)"
   [r g b]
   (Color. (float r) (float g) (float b)))
 
+(defn- item-bounds [item]
+  {:x (* (horiz (:location item)) (cell-width))
+   :y (* (vert (:location item))  (cell-height))
+   :width (dec (cell-width))
+   :height (dec (cell-height))})
+
+(defn- bounds-center [bounds]
+  {:x (+ (/ (:width bounds) 2)
+	 (:x bounds))
+   :y (+ (/ (:height bounds) 2)
+	 (:y bounds))})
+
+(defn- draw-text
+  "Draws the text text in color color at location loc"
+  [g text color loc]
+  (doto g
+    (.setColor color)
+    (.drawString text
+		 (int (horiz loc))
+		 (int (vert loc)))))
+
+(defn- draw-centered-text
+  "Draws text in color centered at the loc"
+  [g text clr loc]
+  (let [font (.getFont g) 
+	m (.getFontMetrics g font)
+	h (.getHeight m)
+	w (.stringWidth m text)
+	cx (- (horiz loc) (/ w 2))
+	cy (+ (vert loc) (/ h 2))]
+    (draw-text g text clr [cx cy])))
+
+(defn- draw-item-text 
+  "Draws text text in color color bounded by the item."
+  [g item color text]
+  (let [bounds (item-bounds item)
+	center (bounds-center bounds)]
+    (draw-centered-text g text color [(:x center) (:y center)])))
+
 (defmulti get-color :type)
 (defmethod get-color ::wall [o]  (color 1 0 0))
 (defmethod get-color ::cursor [o] (color 0 1 0))
 (defmethod get-color ::bomb [o] (color 0 0 0))
 (defmethod get-color :default [o] (color 0 0 0))
 
+(defmulti get-text-color :type)
+(defmethod get-text-color ::bomb [o] (color 1 1 1))
+(defmethod get-text-color :default [o] (color 1 1 0))
+
 (derive ::wall ::rectangular)
 (derive ::cursor ::rectangular)
 (derive ::bomb ::round)
 
 (defmulti paint-item (fn [g item] (:type item)))
-
-(defn- item-bounds [item]
-  {:x (* (horiz (:location item)) (cell-width))
-   :y (* (vert (:location item))  (cell-height))
-   :width (dec (cell-width))
-   :height (dec (cell-height))}
-  )
 
 (defmethod paint-item ::rectangular [g item]
   (let [bounds (item-bounds item)] 
@@ -154,7 +215,7 @@ maximum (exclusive)"
      (/ (cell-width) 5)
      (/ (cell-height) 5))))
 
-(defmethod paint-item ::round [g item]
+(defn- paint-round-item [g item]
   (let [bounds (item-bounds item)] 
     (.fillOval 
      g
@@ -163,15 +224,27 @@ maximum (exclusive)"
      (:width bounds)
      (:height bounds))))
 
+(defn- bomb-text [bomb]
+  (let [{fuze :fuze created :created} bomb]
+   (str (int (- fuze (- @clock created))))))
+
+(defmethod paint-item ::bomb [g bomb]
+  (paint-round-item g bomb)
+  (draw-item-text g bomb (get-text-color bomb) (bomb-text bomb)))
+
+(defmethod paint-item ::round [g item]
+  (paint-round-item g item))
+
 (defn- paint 
   "Paints the game"
   [g]
   (doseq [item @game-state]
 ;   (println item)
 ;   (println (get-color item))
-    (.setColor g (get-color item))
-    (paint-item g item)
-    ))
+    (doto g
+      (draw-text (str @clock) (color 0 1 1) [20 20])
+      (.setColor (get-color item))
+      (paint-item item))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Keypress stuff
@@ -191,10 +264,11 @@ maximum (exclusive)"
 	      (replace {cursor (make-item ::cursor (move-cursor (:location cursor) data))} 
 		       @game-state)))))
 
-(defmethod act-on-key ::lay-bomb [action data]
+
+(defmethod act-on-key ::lay-bomb [action]
   (dosync 
    (let [cursor (get-cursor)]
-     (alter game-state conj (make-item ::bomb (:location cursor))))))
+     (alter game-state conj (make-bomb (:location cursor) 5)))))
 
 (defmethod act-on-key :default 
   ([] "Ignoring keypress")
@@ -210,6 +284,22 @@ maximum (exclusive)"
 ;; 		    (*dirs* (.getKeyCode e))))
   (apply act-on-key (*key-map* (.getKeyCode e))))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Timer handlers
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn- advance-clock [t]
+  (dosync (alter clock + t)))
+
+(defn- update
+  "Handles the firing of the timer event."
+  [e panel]
+  (advance-clock turn-length)
+  (.repaint panel))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Swing stuff
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn- make-panel
   "Creates the JPanel for the app."
@@ -224,12 +314,18 @@ maximum (exclusive)"
      [g]
      (proxy-super paintComponent g)
      (paint g))
-    (actionPerformed [e])
+    (actionPerformed [e]
+		     (update e this))
     (keyPressed [e] 
 		(handle-keypress e)
 		(.repaint this))
     (keyReleased [e])
     (keyTyped [e])))
+
+(defn- make-timer
+  "Creates the timer that drives the game loop."
+  [panel]
+  (new Timer (int (* 1000 turn-length)) panel))
 
 (defn- stop? 
   "Determines if the game is over."
@@ -243,9 +339,11 @@ maximum (exclusive)"
     (.show frame)
     (loop [stop false]
      (if stop
-       "Game over"
        (do 
-	 (Thread/sleep *turn-length*)
+	 (.hide frame)
+	 "Game over")
+       (do 
+	 (Thread/sleep turn-length)
 	 (recur (stop? frame)))))))
 
 (defn- setup 
@@ -253,7 +351,8 @@ maximum (exclusive)"
 game-related invocation."
   [exit-on-close]
   (let [frame (make-frame)
-	panel (make-panel)]
+	panel (make-panel)
+	timer (make-timer panel)]
     (dosync (ref-set game-state (initial-game-state 0.25)))
     (.add frame panel)
     (.setFocusable panel true)
@@ -262,6 +361,7 @@ game-related invocation."
       (.setDefaultCloseOperation frame JFrame/EXIT_ON_CLOSE))
     (.pack frame)
     (.show frame)
+    (.start timer)
     [frame panel]))
 
 (defn main []

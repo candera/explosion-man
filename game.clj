@@ -279,7 +279,7 @@ maximum (exclusive)"
     (doto g
       (draw-text (str 
 		  (if (:paused @clock)
-		    "PAUSED"
+		    "PAUSED:"
 		    "") 
 		  (:time @clock)) 
 		 (color 0 1 1) 
@@ -417,5 +417,13 @@ game-related invocation."
      (finally
       (.dispose frame)))))
 
+(defn- reset-state 
+  "Returns the game state to a default"
+  []
+  (dosync
+   (ref-set game-state {})
+   (ref-set clock {:time 0 :paused false})))
+
 (defn main-test []
+  (reset-state)
   (setup false))

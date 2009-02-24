@@ -1,12 +1,15 @@
 ;; ! TODO
-;; * Make bomb count down to zero and disappear (no explosion)
-;; * Make bomb explode
+;; * Make bomb explosion expand in each direction
+;; * Make bomb explosion stop at walls
 ;; * Add destroyable obstacles
 ;; * Make bomb explosion remove obstacles
 ;; * Handle shutdown - timers are sticking around and the panel is
 ;;   not getting created anew every time.
 ;; 
 ;; ! DONE 
+;; * Make bomb explode
+;; * Make bomb and disappear at zero (no explosion)
+;; * Make bomb count down to zero
 ;; * Add ability to drop bomb by pressing a key (no behavior)
 ;; * Read something on git that explains the bits I don't understand
 ;; * Move the highlighted square through the maze (collision detection)
@@ -15,7 +18,6 @@
 ;; * Get board to paint with simple colored boxes in a grid
 ;; * Handle a keypress and make it move a highlighted square around the
 ;;   board. 
-
 
 (ns com.wangdera.explosion-man.game
   (:import (javax.swing JFrame JPanel Timer)
@@ -27,7 +29,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Static imports
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(import-static java.awt.event.KeyEvent VK_LEFT VK_RIGHT VK_UP VK_DOWN VK_SPACE)
+(import-static java.awt.event.KeyEvent VK_LEFT VK_RIGHT VK_UP VK_DOWN VK_SPACE VK_PAUSE)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Constants
@@ -35,13 +37,14 @@
 
 (def turn-length 1)     ; Length of a turn in seconds
 (def board-dims [25 25])  ; Size of board in cells
-(def *cell-dims* [40 40])   ; Size of cell in pixels
+(def cell-dims [40 40])   ; Size of cell in pixels
 
-(def *key-map* {VK_LEFT  [::movement [-1 0]]
-		VK_DOWN  [::movement [0 1]]
-		VK_UP    [::movement [0 -1]]
-		VK_RIGHT [::movement [1 0]]
-		VK_SPACE [::lay-bomb]})
+(def key-map {VK_LEFT  [::movement [-1 0]]
+	      VK_DOWN  [::movement [0 1]]
+	      VK_UP    [::movement [0 -1]]
+	      VK_RIGHT [::movement [1 0]]
+	      VK_SPACE [::lay-bomb]
+	      VK_PAUSE [::toggle-paused]})
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -49,7 +52,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (def game-state (ref []))
-(def clock (ref 0))
+(def clock (ref {:time 0 :paused false}))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Functions
@@ -84,15 +87,15 @@ maximum (exclusive)"
 (defn- cell-width
   "Returns the width of a cell in pixels"
   []
-  (horiz *cell-dims*))
+  (horiz cell-dims))
 
 (defn- cell-height
   "Returns the height of a cell in pixels"
   []
-  (vert *cell-dims*))
+  (vert cell-dims))
 
 (defn- make-item [t loc]
-  {:type t :location loc :created @clock})
+  {:type t :location loc :created (:time @clock)})
 
 (defn- make-bomb 
   "Creates a bomb at the specified location and with the specified fuze (in seconds)."
@@ -125,20 +128,53 @@ maximum (exclusive)"
   (first (filter #(= (:type %) ::cursor) @game-state)))
 
 (defn- wall-at?
-  "Returns true if there is a wall at the specified location"
+  "Returns true if there is a wall at the specified location."
   [loc]
   (some #(and (= (:type %) ::wall)
 	      (= (:location %) loc))
 	@game-state))
 
 (defn- move-cursor 
-  "Moves the cursor in the specified direction"
+  "Moves the cursor in the specified direction."
   [cursor-loc direction]
   (let [proposed-location (vec (map clamp-to (map + cursor-loc direction) [0 0] board-dims))]
    (if (wall-at? proposed-location) 
      cursor-loc
      proposed-location)))
 
+(defn- bomb-fuze 
+  "Returns the remaining fuze for a given bomb."
+  [bomb]
+  (let [{fuze :fuze created :created} bomb] 
+    (- fuze (- (:time @clock) created))))
+
+(defn- bomb-text 
+  "Returns the text that should be overload on a bomb."
+  [bomb]
+  (str (int (bomb-fuze bomb))))
+
+(defn- fuze-expired? 
+  "Returns true if the fuze of a given bomb has expired."
+  [bomb]
+  (< (bomb-fuze bomb) 0))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Game state update
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn- explode 
+  "Returns the explosion that a given bomb produces."
+  [bomb]
+  (make-item ::explosion (:location bomb)))
+
+(defmulti update-item "Updates items in the game" :type)
+
+(defmethod update-item ::bomb [bomb]
+  (if (fuze-expired? bomb)
+    (do 
+      (alter game-state #(replace {bomb (explode bomb)} %)))))
+
+(defmethod update-item :default [item]) ; Do nothing
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Graphics stuff
@@ -192,6 +228,7 @@ maximum (exclusive)"
 (defmethod get-color ::wall [o]  (color 1 0 0))
 (defmethod get-color ::cursor [o] (color 0 1 0))
 (defmethod get-color ::bomb [o] (color 0 0 0))
+(defmethod get-color ::explosion [o] (color 1 1 0))
 (defmethod get-color :default [o] (color 0 0 0))
 
 (defmulti get-text-color :type)
@@ -201,6 +238,7 @@ maximum (exclusive)"
 (derive ::wall ::rectangular)
 (derive ::cursor ::rectangular)
 (derive ::bomb ::round)
+(derive ::explosion ::round)
 
 (defmulti paint-item (fn [g item] (:type item)))
 
@@ -224,9 +262,6 @@ maximum (exclusive)"
      (:width bounds)
      (:height bounds))))
 
-(defn- bomb-text [bomb]
-  (let [{fuze :fuze created :created} bomb]
-   (str (int (- fuze (- @clock created))))))
 
 (defmethod paint-item ::bomb [g bomb]
   (paint-round-item g bomb)
@@ -242,35 +277,42 @@ maximum (exclusive)"
 ;   (println item)
 ;   (println (get-color item))
     (doto g
-      (draw-text (str @clock) (color 0 1 1) [20 20])
+      (draw-text (str 
+		  (if (:paused @clock)
+		    "PAUSED"
+		    "") 
+		  (:time @clock)) 
+		 (color 0 1 1) 
+		 [20 20])
       (.setColor (get-color item))
       (paint-item item))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Keypress stuff
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defn- act-on-key-dispatch
-  "Dispatch function for the act-on-key multimethod"
+(defn- update-for-keypress-dispatch
+  "Dispatch function for the update-for-keypress multimethod"
   ([] nil)
   ([action] action)
   ([action data] action))
 
-(defmulti act-on-key act-on-key-dispatch)
+(defmulti update-for-keypress update-for-keypress-dispatch)
 
-(defmethod act-on-key ::movement [action data]
-  (dosync 
-   (let [cursor (get-cursor)]
-     (ref-set game-state 
-	      (replace {cursor (make-item ::cursor (move-cursor (:location cursor) data))} 
-		       @game-state)))))
+(defmethod update-for-keypress ::movement [action data]
+  (let [cursor (get-cursor)]
+    (ref-set game-state 
+	     (replace {cursor (make-item ::cursor (move-cursor (:location cursor) data))} 
+		      @game-state))))
 
 
-(defmethod act-on-key ::lay-bomb [action]
-  (dosync 
-   (let [cursor (get-cursor)]
-     (alter game-state conj (make-bomb (:location cursor) 5)))))
+(defmethod update-for-keypress ::lay-bomb [action]
+  (let [cursor (get-cursor)]
+    (alter game-state conj (make-bomb (:location cursor) 5))))
 
-(defmethod act-on-key :default 
+(defmethod update-for-keypress ::toggle-paused [action]
+  (alter clock assoc :paused (not (:paused @clock))))
+
+(defmethod update-for-keypress :default 
   ([] "Ignoring keypress")
   ([action] "Ignoring keypress")
   ([action data]
@@ -282,19 +324,23 @@ maximum (exclusive)"
 ;;   (println (format "Key pressed: %s %s %s" (:cursor @game-state)
 ;; 		    (.getKeyCode e)
 ;; 		    (*dirs* (.getKeyCode e))))
-  (apply act-on-key (*key-map* (.getKeyCode e))))
+  (dosync (apply update-for-keypress (key-map (.getKeyCode e)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Timer handlers
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn- advance-clock [t]
-  (dosync (alter clock + t)))
+(defn- update-clock [t]
+  (if (not (:paused @clock))
+    (alter clock assoc :time (+ (:time @clock) t))))
 
-(defn- update
+(defn- handle-timer-event
   "Handles the firing of the timer event."
   [e panel]
-  (advance-clock turn-length)
+  (dosync 
+   (update-clock turn-length)
+   (if (not (:paused @clock))
+     (doseq [item @game-state] (update-item item))))
   (.repaint panel))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -315,7 +361,7 @@ maximum (exclusive)"
      (proxy-super paintComponent g)
      (paint g))
     (actionPerformed [e]
-		     (update e this))
+		     (handle-timer-event e this))
     (keyPressed [e] 
 		(handle-keypress e)
 		(.repaint this))

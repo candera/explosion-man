@@ -1,10 +1,10 @@
 ;; ! TODO
+;; * Handle shutdown - timers are sticking around and the panel is
+;;   not getting created anew every time.
 ;; * Make bomb explosion expand in each direction
 ;; * Make bomb explosion stop at walls
 ;; * Add destroyable obstacles
 ;; * Make bomb explosion remove obstacles
-;; * Handle shutdown - timers are sticking around and the panel is
-;;   not getting created anew every time.
 ;; 
 ;; ! DONE 
 ;; * Make bomb explode
@@ -22,7 +22,7 @@
 (ns com.wangdera.explosion-man.game
   (:import (javax.swing JFrame JPanel Timer)
 	   (java.awt Dimension)
-	   (java.awt.event ActionListener KeyListener KeyEvent)
+	   (java.awt.event ActionListener KeyListener KeyEvent WindowAdapter)
 	   (java.awt Color))
   (:use (clojure.contrib import-static cond)))
 
@@ -52,7 +52,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (def game-state (ref []))
-(def clock (ref {:time 0 :paused false}))
+(def clock (ref {:time 0.0 :paused false}))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Functions
@@ -94,18 +94,17 @@ maximum (exclusive)"
   []
   (vert cell-dims))
 
-(defn- make-item [t loc]
-  {:type t :location loc :created (:time @clock)})
+(defn- make-item [t loc & attrs]
+  (let [item  {:type t :location loc :created (:time @clock)}]
+    (if attrs
+      (apply assoc item attrs)
+      item)))
 
 (defn- make-bomb 
   "Creates a bomb at the specified location and with the specified fuze (in seconds)."
   [loc fuze]
   (assoc (make-item ::bomb loc) :fuze 20))
 
-(defn- make-frame 
-  "Creates the JFrame for the app."
-  []
-  (JFrame. "Explosion Man"))
 
 (defn- make-random-locations
   "Creates a random collection of locations on the grid specified by [width height]"
@@ -228,7 +227,7 @@ maximum (exclusive)"
 (defmethod get-color ::wall [o]  (color 1 0 0))
 (defmethod get-color ::cursor [o] (color 0 1 0))
 (defmethod get-color ::bomb [o] (color 0 0 0))
-(defmethod get-color ::explosion [o] (color 1 1 0))
+(defmethod get-color ::explosion [o] (color 1 0.75 0))
 (defmethod get-color :default [o] (color 0 0 0))
 
 (defmulti get-text-color :type)
@@ -347,6 +346,11 @@ maximum (exclusive)"
 ;; Swing stuff
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(defn- make-frame 
+  "Creates the JFrame for the app."
+  []
+  (JFrame. "Explosion Man"))
+
 (defn- make-panel
   "Creates the JPanel for the app."
   []
@@ -367,6 +371,18 @@ maximum (exclusive)"
 		(.repaint this))
     (keyReleased [e])
     (keyTyped [e])))
+
+(defn- make-window-listener
+  "Creates a class that listens for events on the window."
+  [timer]
+  (proxy [WindowAdapter] []
+    (windowClosed [e]
+		  (println "Window closed"))
+    (windowClosing [e]
+		   (println "Window closing")
+		   (.stop timer))
+    (windowIconified [e]
+		     (println "Window iconified"))))
 
 (defn- make-timer
   "Creates the timer that drives the game loop."
@@ -403,8 +419,11 @@ game-related invocation."
     (.add frame panel)
     (.setFocusable panel true)
     (.addKeyListener panel panel)
-    (if exit-on-close 
-      (.setDefaultCloseOperation frame JFrame/EXIT_ON_CLOSE))
+    (.setDefaultCloseOperation frame 
+			       (if exit-on-close 
+				 JFrame/EXIT_ON_CLOSE
+				 JFrame/DISPOSE_ON_CLOSE))
+    (.addWindowListener frame (make-window-listener timer))
     (.pack frame)
     (.show frame)
     (.start timer)

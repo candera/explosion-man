@@ -1,12 +1,13 @@
 ;; ! TODO
-;; * Handle shutdown - timers are sticking around and the panel is
-;;   not getting created anew every time.
-;; * Make bomb explosion expand in each direction
+;; * Make explosions go away when expired
 ;; * Make bomb explosion stop at walls
 ;; * Add destroyable obstacles
 ;; * Make bomb explosion remove obstacles
 ;; 
 ;; ! DONE 
+;; * Make bomb explosion expand in each direction
+;; * Handle shutdown - timers are sticking around and the panel is
+;;   not getting created anew every time.
 ;; * Make bomb explode
 ;; * Make bomb and disappear at zero (no explosion)
 ;; * Make bomb count down to zero
@@ -35,7 +36,7 @@
 ;; Constants
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(def turn-length 1)     ; Length of a turn in seconds
+(def turn-length 0.05)     ; Length of a turn in seconds
 (def board-dims [25 25])  ; Size of board in cells
 (def cell-dims [40 40])   ; Size of cell in pixels
 
@@ -52,7 +53,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (def game-state (ref []))
-(def clock (ref {:time 0.0 :paused false}))
+(def clock (ref {:time (float 0) :paused false}))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Functions
@@ -103,8 +104,15 @@ maximum (exclusive)"
 (defn- make-bomb 
   "Creates a bomb at the specified location and with the specified fuze (in seconds)."
   [loc fuze]
-  (assoc (make-item ::bomb loc) :fuze 20))
+  (make-item ::bomb loc :fuze 5 :strength 2))
 
+(defn- make-explosion
+  "Creates an explosion from the specified bomb."
+  [bomb]
+  (make-item ::expanding-explosion (:location bomb) 
+	     :expanding [[-1 0] [0 -1] [1 0] [0 1]] 
+	     :strength (:strength bomb)
+	     :speed 10))
 
 (defn- make-random-locations
   "Creates a random collection of locations on the grid specified by [width height]"
@@ -150,7 +158,7 @@ maximum (exclusive)"
 (defn- bomb-text 
   "Returns the text that should be overload on a bomb."
   [bomb]
-  (str (int (bomb-fuze bomb))))
+  (format "%.1f" (bomb-fuze bomb)))
 
 (defn- fuze-expired? 
   "Returns true if the fuze of a given bomb has expired."
@@ -164,14 +172,35 @@ maximum (exclusive)"
 (defn- explode 
   "Returns the explosion that a given bomb produces."
   [bomb]
-  (make-item ::explosion (:location bomb)))
+  (make-explosion bomb))
 
 (defmulti update-item "Updates items in the game" :type)
 
 (defmethod update-item ::bomb [bomb]
   (if (fuze-expired? bomb)
-    (do 
-      (alter game-state #(replace {bomb (explode bomb)} %)))))
+    (alter game-state #(replace {bomb (explode bomb)} %))))
+
+(defn- ready-to-expand? 
+  "Returns true if the explosion is ready to expand in the directions indicated."
+  [explosion]
+  (> (:time @clock)
+     (+ (:created explosion)
+	(/ (:speed explosion)))))
+
+(defn- expanded-explosion
+  "Returns a new explosion in direction dir based on the specified explosion"
+  [explosion dir]
+  (if (> (:strength explosion) 0)
+    (make-item ::expanding-explosion (vec (map + dir (:location explosion)))
+	       :expanding [dir]
+	       :strength (dec (:strength explosion))
+	       :speed (:speed explosion))))
+
+(defmethod update-item ::expanding-explosion [explosion]
+  (if (ready-to-expand? explosion)
+    (do
+      (alter game-state concat (remove nil? (map #(expanded-explosion explosion %) (:expanding explosion))))
+      (alter game-state #(replace %2 %1) {explosion (assoc explosion :type ::expanded-explosion)}))))
 
 (defmethod update-item :default [item]) ; Do nothing
 
@@ -227,7 +256,8 @@ maximum (exclusive)"
 (defmethod get-color ::wall [o]  (color 1 0 0))
 (defmethod get-color ::cursor [o] (color 0 1 0))
 (defmethod get-color ::bomb [o] (color 0 0 0))
-(defmethod get-color ::explosion [o] (color 1 0.75 0))
+(defmethod get-color ::expanding-explosion [o] (color 1 0.75 0))
+(defmethod get-color ::expanded-explosion [o] (color 1 0 0.5))
 (defmethod get-color :default [o] (color 0 0 0))
 
 (defmulti get-text-color :type)
@@ -237,7 +267,8 @@ maximum (exclusive)"
 (derive ::wall ::rectangular)
 (derive ::cursor ::rectangular)
 (derive ::bomb ::round)
-(derive ::explosion ::round)
+(derive ::expanded-explosion ::round)
+(derive ::expanding-explosion ::round)
 
 (defmulti paint-item (fn [g item] (:type item)))
 
@@ -261,7 +292,6 @@ maximum (exclusive)"
      (:width bounds)
      (:height bounds))))
 
-
 (defmethod paint-item ::bomb [g bomb]
   (paint-round-item g bomb)
   (draw-item-text g bomb (get-text-color bomb) (bomb-text bomb)))
@@ -280,7 +310,7 @@ maximum (exclusive)"
 		  (if (:paused @clock)
 		    "PAUSED:"
 		    "") 
-		  (:time @clock)) 
+		  (format "%.1f" (:time @clock))) 
 		 (color 0 1 1) 
 		 [20 20])
       (.setColor (get-color item))
@@ -441,7 +471,7 @@ game-related invocation."
   []
   (dosync
    (ref-set game-state {})
-   (ref-set clock {:time 0 :paused false})))
+   (ref-set clock {:time (float 0) :paused false})))
 
 (defn main-test []
   (reset-state)

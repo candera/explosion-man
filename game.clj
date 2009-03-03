@@ -189,14 +189,25 @@ maximum (exclusive)"
      (+ (:created explosion)
 	(/ (:speed explosion)))))
 
+(defn- in-bounds? 
+  "Returns true when the proposed location is on the board"
+  [[x y]]
+  (and (< x (horiz board-dims))
+       (> x -1)
+       (< y (vert board-dims))
+       (> y -1)))
+
 (defn- expanded-explosion
   "Returns a new explosion in direction dir based on the specified explosion"
   [explosion dir]
-  (if (> (:strength explosion) 0)
-    (make-item ::expanding-explosion (vec (map + dir (:location explosion)))
-	       :expanding [dir]
-	       :strength (dec (:strength explosion))
-	       :speed (:speed explosion))))
+  (let [proposed-loc (vec (map + dir (:location explosion)))] 
+    (if (and (in-bounds? proposed-loc) 
+	     (not (wall-at? proposed-loc))
+	     (> (:strength explosion) 0))
+      (make-item ::expanding-explosion proposed-loc
+		 :expanding [dir]
+		 :strength (dec (:strength explosion))
+		 :speed (:speed explosion)))))
 
 (defmethod update-item ::expanding-explosion [explosion]
   (if (ready-to-expand? explosion)

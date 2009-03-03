@@ -1,10 +1,10 @@
 ;; ! TODO
-;; * Make explosions go away when expired
 ;; * Make bomb explosion stop at walls
 ;; * Add destroyable obstacles
 ;; * Make bomb explosion remove obstacles
 ;; 
 ;; ! DONE 
+;; * Make explosions go away when expired
 ;; * Make bomb explosion expand in each direction
 ;; * Handle shutdown - timers are sticking around and the panel is
 ;;   not getting created anew every time.
@@ -39,6 +39,8 @@
 (def turn-length 0.05)     ; Length of a turn in seconds
 (def board-dims [25 25])  ; Size of board in cells
 (def cell-dims [40 40])   ; Size of cell in pixels
+(def explosion-speed 15)  ; Rate at which explosions expand [cells/sec]
+(def explosion-lifetime 0.5) ; Time before explosions disappear [seconds] 
 
 (def key-map {VK_LEFT  [::movement [-1 0]]
 	      VK_DOWN  [::movement [0 1]]
@@ -112,7 +114,7 @@ maximum (exclusive)"
   (make-item ::expanding-explosion (:location bomb) 
 	     :expanding [[-1 0] [0 -1] [1 0] [0 1]] 
 	     :strength (:strength bomb)
-	     :speed 10))
+	     :speed explosion-speed))
 
 (defn- make-random-locations
   "Creates a random collection of locations on the grid specified by [width height]"
@@ -201,6 +203,17 @@ maximum (exclusive)"
     (do
       (alter game-state concat (remove nil? (map #(expanded-explosion explosion %) (:expanding explosion))))
       (alter game-state #(replace %2 %1) {explosion (assoc explosion :type ::expanded-explosion)}))))
+
+(defn- expired? 
+  "Returns true when an explosion's lifetime has expired and it should be removed"
+  [explosion]
+  (> (- (:time @clock)
+	(:created explosion))
+     explosion-lifetime))
+
+(defmethod update-item ::expanded-explosion [explosion]
+  (if (expired? explosion) 
+    (alter game-state #(remove (fn [x] (= x explosion)) %))))
 
 (defmethod update-item :default [item]) ; Do nothing
 

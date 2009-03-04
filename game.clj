@@ -1,9 +1,14 @@
 ;; ! TODO
-;; * Make bomb explosion stop at walls
 ;; * Add destroyable obstacles
 ;; * Make bomb explosion remove obstacles
+;; * Make bomb explosions uncover goodies
+;; * Make bomb explosions kill the player
+;; * Add status bar at the side/top whatever
+;; * Make the game end after a certain amount of time
+;; * Change from random to specified mazes
 ;; 
 ;; ! DONE 
+;; * Make bomb explosion stop at walls
 ;; * Make explosions go away when expired
 ;; * Make bomb explosion expand in each direction
 ;; * Handle shutdown - timers are sticking around and the panel is
@@ -209,10 +214,15 @@ maximum (exclusive)"
 		 :strength (dec (:strength explosion))
 		 :speed (:speed explosion)))))
 
+(defn- explosion-expansions
+  "Returns the expansions of a given explosion"
+  [explosion]
+  (remove nil? (map #(expanded-explosion explosion %) (:expanding explosion))))
+
 (defmethod update-item ::expanding-explosion [explosion]
   (if (ready-to-expand? explosion)
     (do
-      (alter game-state concat (remove nil? (map #(expanded-explosion explosion %) (:expanding explosion))))
+      (alter game-state (fn [v] (vec (concat v (explosion-expansions explosion))))) ; Weird, but it blows up without the vec
       (alter game-state #(replace %2 %1) {explosion (assoc explosion :type ::expanded-explosion)}))))
 
 (defn- expired? 

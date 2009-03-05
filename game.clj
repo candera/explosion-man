@@ -1,13 +1,15 @@
 ;; ! TODO
-;; * Add destroyable obstacles
+;; * Make obstacles barriers to movement
 ;; * Make bomb explosion remove obstacles
 ;; * Make bomb explosions uncover goodies
 ;; * Make bomb explosions kill the player
 ;; * Add status bar at the side/top whatever
 ;; * Make the game end after a certain amount of time
 ;; * Change from random to specified mazes
+;; * Get it to run as an applet, or at least standalone
 ;; 
 ;; ! DONE 
+;; * Add obstacles
 ;; * Make bomb explosion stop at walls
 ;; * Make explosions go away when expired
 ;; * Make bomb explosion expand in each direction
@@ -123,23 +125,26 @@ maximum (exclusive)"
 
 (defn- make-random-locations
   "Creates a random collection of locations on the grid specified by [width height]"
-  [[width height] density]
-  (vec (distinct (for [i (range 0 (* density (* width height)))]
-		   [(rand-int width) (rand-int height)]))))
-
+  [[width height] density exclusions]
+  (vec (difference 
+	(into #{} (for [i (range 0 (* density (* width height)))]
+		    [(rand-int width) (rand-int height)]))
+	exclusions)))
 
 (defn- initial-game-state
   "Returns a new game with a random maze of the given density"
   [density]
-  (let [cursor (make-item ::cursor (vec (map #(int (/ % 2)) board-dims)))] 
-    (into [cursor] 
-	  (remove #(= % (make-item ::wall (:location cursor))) 
-		  (map #(make-item ::wall %) (make-random-locations board-dims density))))))
+  (let [player-loc (vec (map #(int (/ % 2)) board-dims))
+	wall-locs (make-random-locations board-dims density [player-loc])
+	obstacle-locs (make-random-locations board-dims density (concat [player-loc] wall-locs))] 
+    (vec (concat [(make-item ::player player-loc)]
+		 (map #(make-item ::wall %) wall-locs)
+		 (map #(make-item ::obstacle %) obstacle-locs)))))
 
-(defn- get-cursor
-  "Returns the cursor object"
+(defn- get-player
+  "Returns the player object"
   []
-  (first (filter #(= (:type %) ::cursor) @game-state)))
+  (first (filter #(= (:type %) ::player) @game-state)))
 
 (defn- wall-at?
   "Returns true if there is a wall at the specified location."
@@ -148,12 +153,12 @@ maximum (exclusive)"
 	      (= (:location %) loc))
 	@game-state))
 
-(defn- move-cursor 
-  "Moves the cursor in the specified direction."
-  [cursor-loc direction]
-  (let [proposed-location (vec (map clamp-to (map + cursor-loc direction) [0 0] board-dims))]
+(defn- move-player 
+  "Moves the player in the specified direction."
+  [player-loc direction]
+  (let [proposed-location (vec (map clamp-to (map + player-loc direction) [0 0] board-dims))]
    (if (wall-at? proposed-location) 
-     cursor-loc
+     player-loc
      proposed-location)))
 
 (defn- bomb-fuze 
@@ -222,7 +227,7 @@ maximum (exclusive)"
 (defmethod update-item ::expanding-explosion [explosion]
   (if (ready-to-expand? explosion)
     (do
-      (alter game-state (fn [v] (vec (concat v (explosion-expansions explosion))))) ; Weird, but it blows up without the vec
+      (alter game-state (fn [v] (doall (concat v (explosion-expansions explosion))))) ; Weird, but it blows up without the vec
       (alter game-state #(replace %2 %1) {explosion (assoc explosion :type ::expanded-explosion)}))))
 
 (defn- expired? 
@@ -288,18 +293,20 @@ maximum (exclusive)"
 
 (defmulti get-color :type)
 (defmethod get-color ::wall [o]  (color 1 0 0))
-(defmethod get-color ::cursor [o] (color 0 1 0))
+(defmethod get-color ::player [o] (color 0 1 0))
 (defmethod get-color ::bomb [o] (color 0 0 0))
 (defmethod get-color ::expanding-explosion [o] (color 1 0.75 0))
 (defmethod get-color ::expanded-explosion [o] (color 1 0 0.5))
-(defmethod get-color :default [o] (color 0 0 0))
+(defmethod get-color ::obstacle [o] (color 0 0.25 1))
+(defmethod get-color :default [o] (color 0.5 0.25 0.25))
 
 (defmulti get-text-color :type)
 (defmethod get-text-color ::bomb [o] (color 1 1 1))
 (defmethod get-text-color :default [o] (color 1 1 0))
 
 (derive ::wall ::rectangular)
-(derive ::cursor ::rectangular)
+(derive ::obstacle ::rectangular)
+(derive ::player ::rectangular)
 (derive ::bomb ::round)
 (derive ::expanded-explosion ::round)
 (derive ::expanding-explosion ::round)
@@ -333,6 +340,10 @@ maximum (exclusive)"
 (defmethod paint-item ::round [g item]
   (paint-round-item g item))
 
+(defmethod paint-item :default [g item]
+  (paint-round-item g item)
+  (draw-item-text g item (get-text-color item) "xx"))
+
 (defn- paint 
   "Paints the game"
   [g]
@@ -362,15 +373,15 @@ maximum (exclusive)"
 (defmulti update-for-keypress update-for-keypress-dispatch)
 
 (defmethod update-for-keypress ::movement [action data]
-  (let [cursor (get-cursor)]
+  (let [player (get-player)]
     (ref-set game-state 
-	     (replace {cursor (make-item ::cursor (move-cursor (:location cursor) data))} 
+	     (replace {player (make-item ::player (move-player (:location player) data))} 
 		      @game-state))))
 
 
 (defmethod update-for-keypress ::lay-bomb [action]
-  (let [cursor (get-cursor)]
-    (alter game-state conj (make-bomb (:location cursor) 5))))
+  (let [player (get-player)]
+    (alter game-state conj (make-bomb (:location player) 5))))
 
 (defmethod update-for-keypress ::toggle-paused [action]
   (alter clock assoc :paused (not (:paused @clock))))
@@ -384,7 +395,7 @@ maximum (exclusive)"
 (defn- handle-keypress 
   "Updates the game state accordingly when a key is pressed"
   [e]
-;;   (println (format "Key pressed: %s %s %s" (:cursor @game-state)
+;;   (println (format "Key pressed: %s %s %s" (:player @game-state)
 ;; 		    (.getKeyCode e)
 ;; 		    (*dirs* (.getKeyCode e))))
   (dosync (apply update-for-keypress (key-map (.getKeyCode e)))))

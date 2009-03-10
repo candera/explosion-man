@@ -1,12 +1,15 @@
 ;; ! TODO
+;; * Change position tuple from a vector to a map
+;; * Get it to run as an applet, or at least standalone
+;;   * Write a build script that compiles and updates a target directory
 ;; * Make obstacles barriers to movement
 ;; * Make bomb explosion remove obstacles
 ;; * Make bomb explosions uncover goodies
 ;; * Make bomb explosions kill the player
+;; * Limit player movement rate
 ;; * Add status bar at the side/top whatever
 ;; * Make the game end after a certain amount of time
 ;; * Change from random to specified mazes
-;; * Get it to run as an applet, or at least standalone
 ;; 
 ;; ! DONE 
 ;; * Add obstacles
@@ -32,7 +35,8 @@
 	   (java.awt Dimension)
 	   (java.awt.event ActionListener KeyListener KeyEvent WindowAdapter)
 	   (java.awt Color))
-  (:use (clojure.contrib import-static cond)))
+  (:use (clojure.contrib import-static cond)
+	(clojure set)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Static imports

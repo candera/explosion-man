@@ -2,7 +2,6 @@
 ;; * Change position tuple from a vector to a map
 ;; * Get it to run as an applet, or at least standalone
 ;;   * Write a build script that compiles and updates a target directory
-;; * Make obstacles barriers to movement
 ;; * Make bomb explosion remove obstacles
 ;; * Make bomb explosions uncover goodies
 ;; * Make bomb explosions kill the player
@@ -12,6 +11,7 @@
 ;; * Change from random to specified mazes
 ;; 
 ;; ! DONE 
+;; * Make obstacles barriers to movement
 ;; * Add obstacles
 ;; * Make bomb explosion stop at walls
 ;; * Make explosions go away when expired
@@ -31,12 +31,13 @@
 ;;   board. 
 
 (ns com.wangdera.explosion-man.game
-  (:import (javax.swing JFrame JPanel Timer)
-	   (java.awt Dimension)
-	   (java.awt.event ActionListener KeyListener KeyEvent WindowAdapter)
-	   (java.awt Color))
-  (:use (clojure.contrib import-static cond)
-	(clojure set)))
+  (:import [javax.swing JFrame JPanel Timer]
+	   [java.awt Dimension]
+	   [java.awt.event ActionListener KeyListener KeyEvent WindowAdapter]
+	   [java.awt Color])
+  (:use [clojure.contrib import-static cond]
+	[clojure.contrib.seq-utils]
+	[clojure.set :only [difference]]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Static imports
@@ -150,20 +151,31 @@ maximum (exclusive)"
   []
   (first (filter #(= (:type %) ::player) @game-state)))
 
-(defn- wall-at?
-  "Returns true if there is a wall at the specified location."
-  [loc]
-  (some #(and (= (:type %) ::wall)
-	      (= (:location %) loc))
-	@game-state))
+(derive ::wall ::impassable)
+(derive ::obstacle ::impassable)
 
-(defn- move-player 
-  "Moves the player in the specified direction."
-  [player-loc direction]
-  (let [proposed-location (vec (map clamp-to (map + player-loc direction) [0 0] board-dims))]
-   (if (wall-at? proposed-location) 
-     player-loc
-     proposed-location)))
+(defn- items-at [location]
+ (filter #(= (:location %) location) @game-state))
+
+(defn is-impassable-item?
+ [item]
+ (isa? (:type item) ::impassable))
+
+(defn impassable? [location]
+  (some is-impassable-item? (items-at location))
+)
+
+(defn- proposed-location
+ [location direction]
+ (vec (map clamp-to (map + location direction) [0 0] board-dims))
+)
+
+(defn- move-player
+ "Moves the player in the specified direction."
+ [player-loc direction]
+  (if (impassable? (proposed-location player-loc direction))
+    player-loc
+    (proposed-location player-loc direction)))
 
 (defn- bomb-fuze 
   "Returns the remaining fuze for a given bomb."
@@ -216,7 +228,7 @@ maximum (exclusive)"
   [explosion dir]
   (let [proposed-loc (vec (map + dir (:location explosion)))] 
     (if (and (in-bounds? proposed-loc) 
-	     (not (wall-at? proposed-loc))
+	     (not (impassable? proposed-loc))
 	     (> (:strength explosion) 0))
       (make-item ::expanding-explosion proposed-loc
 		 :expanding [dir]
